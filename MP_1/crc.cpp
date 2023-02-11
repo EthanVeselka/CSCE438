@@ -1,4 +1,4 @@
-#include <glog/logging.h>
+//#include <glog/logging.h>
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <netinet/in.h>
@@ -10,7 +10,22 @@
 #include <stdlib.h>
 #include <string.h>
 #include "interface.h"
+#include <iostream>
 
+#include <iostream>
+#include <string>
+#include <sstream>
+#include <vector>
+#include <thread>
+
+using namespace std;
+
+void error(string msg)
+{
+    // perror(msg);
+	LOG(ERROR) << msg;
+    exit(1);
+}
 
 int connect_to(const char *host, const int port);
 struct Reply process_command(const int sockfd, char* command);
@@ -19,17 +34,16 @@ void process_chatmode(const char* host, const int port);
 int main(int argc, char** argv) 
 {
 	if (argc != 3) {
-		LOG(ERROR) << "USAGE: Enter host address and port number";
+		// LOG(ERROR) << "USAGE: Enter host address and port number";
+		error("USAGE: Enter host address and port number");
 		exit(1);
 	}
-	google::InitGoogleLogging(argv[0]);
+	//google::InitGoogleLogging(argv[0]);
 
     display_title();
     
 	while (1) {
-	
 		int sockfd = connect_to(argv[1], atoi(argv[2]));
-    
 		char command[MAX_DATA];
         get_command(command, MAX_DATA);
 
@@ -75,7 +89,8 @@ int connect_to(const char *host, const int port)
 	// Creating socket
 	if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) 
 	{
-		LOG(ERROR) << "ERROR: could not open socket";
+		// LOG(ERROR) << "ERROR: could not open socket";
+		error("ERROR: could not open socket");
 		exit(EXIT_FAILURE);
 	}
 	
@@ -85,14 +100,15 @@ int connect_to(const char *host, const int port)
 	// convert host address from string to decimal format and store in the server_addr struct
 	if(inet_aton(host, &server_addr.sin_addr) == 0)
 	{
-		LOG(ERROR) << "ERROR: invalid host address";
+		// LOG(ERROR) << "ERROR: invalid host address";
+		error("ERROR: invalid host address");
 		exit(EXIT_FAILURE);
 	}
-
 	// connect to host on the specified port using the server_addr struct
 	if (connect(sockfd, (struct sockaddr*) &server_addr, sizeof(server_addr)) < 0)
 	{
-		LOG(ERROR) << "ERROR: could not connect to server";
+		// LOG(ERROR) << "ERROR: could not connect to server";
+		error("ERROR: could not connect to server");
 		exit(EXIT_FAILURE);
 	}
 	
@@ -128,7 +144,8 @@ struct Reply process_command(const int sockfd, char* command)
 
 	if (send(sockfd, command, MAX_DATA, 0) < 0)
 	{
-		LOG(ERROR) << "ERROR: send failed";
+		// LOG(ERROR) << "ERROR: send failed";
+		error("ERROR: send failed");
 		exit(EXIT_FAILURE);		
 	}
 
@@ -138,7 +155,8 @@ struct Reply process_command(const int sockfd, char* command)
 	char response_string[MAX_DATA];
 	if (recv(sockfd, response_string, MAX_DATA, 0) < 0)
 	{
-		LOG(ERROR) << "ERROR: receive failed";
+		// LOG(ERROR) << "ERROR: receive failed";
+		error("ERROR: receive failed");
 		exit(EXIT_FAILURE);		
 	}
 
@@ -206,7 +224,6 @@ void process_chatmode(const char* host, const int port)
 	// ------------------------------------------------------------
 	fd_set readfds;
 	char buf[MAX_DATA];
-
 	while(true)
 	{
 		// Listen for new information on socket or new input from user
@@ -223,7 +240,7 @@ void process_chatmode(const char* host, const int port)
 			{
 				// If the information is empty or could not be read, disconnect from the chatroom and continue
 				printf("Chatroom disconnected...\n");
-				LOG(INFO) << "Chatroom disconnected.";
+				// LOG(INFO) << "Chatroom disconnected.";
 				close(sockfd);
 				break;
 			}
