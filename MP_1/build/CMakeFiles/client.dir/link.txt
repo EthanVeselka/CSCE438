@@ -1,0 +1,1 @@
+/usr/bin/c++ CMakeFiles/client.dir/crc.cpp.o -o client  -Wl,-rpath,/usr/local/lib /usr/local/lib/libglog.so.0.6.0 

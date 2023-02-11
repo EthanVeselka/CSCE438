@@ -1,0 +1,1 @@
+/usr/bin/c++ CMakeFiles/server.dir/crsd.cpp.o -o server  -Wl,-rpath,/usr/local/lib -lpthread /usr/local/lib/libglog.so.0.6.0 
