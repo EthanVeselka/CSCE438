@@ -1,4 +1,4 @@
-//#include <glog/logging.h>
+#include <glog/logging.h>
 // TODO: Implement Chat Server.
 #include <arpa/inet.h>
 #include <netdb.h>
