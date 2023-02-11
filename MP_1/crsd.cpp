@@ -29,6 +29,7 @@ void error(string msg)
     exit(1);
 }
 
+//Helper struct to keep track of room variables for the threads
 struct Room {
     string name;
     int port;
@@ -36,20 +37,22 @@ struct Room {
     vector<int> clientfds;
 };
 
+//Helper struct to keep track of socket variables after room creation
 struct Socket{
     int sockfd, newsockfd, portno;
     socklen_t clilen;
     struct sockaddr_in server_address, cli_addr;
 };
 
-void procc_cmnd(int sock, vector<Room>* chatrooms, vector<Socket>* sockets);
-void sendtoclient(int sock, Reply reply);
-void createRoom(string name, vector<Room>* rooms, vector<Socket>* sockets);
+void procc_cmnd(int sock, vector<Room>* chatrooms, vector<Socket>* sockets); //process command thread function
+void sendtoclient(int sock, Reply reply); //helper send function
+void createRoom(string name, vector<Room>* rooms, vector<Socket>* sockets); // create room function and set socket struct
 
-mutex m;
-vector<Room> chatrooms;
-vector<Socket> sockets;
+mutex m; //mutex for thread locking
+vector<Room> chatrooms; //main ds, keeps track of all chatrooms and associated clients
+vector<Socket> sockets; //socket vector
 
+//broadcasts message to the i'th chatroom from clientfd
 void broadcast(const string message, int clientfd, int i) {
     // unique_lock<mutex> lock(m);
     char buf[MAX_DATA];
@@ -64,6 +67,7 @@ void broadcast(const string message, int clientfd, int i) {
     }
 }
 
+//handle function called by threads each time a client joins a room
 void handle(int client_socket, int i) {
     char buffer[MAX_DATA];
     while (true) {
@@ -83,6 +87,7 @@ void handle(int client_socket, int i) {
     }
 }
 
+//main server function, loops and continually calls threads fro command/chatroom processing
 int main(int argc, char *argv[]) {
     //google::InitGoogleLogging(argv[0]);
 
@@ -147,7 +152,7 @@ void procc_cmnd(int sock, vector<Room>* chatrooms, vector<Socket>* sockets)
     bzero(buffer, MAX_DATA);
 
     /*
-    Read incoming message from socket
+    Read incoming message from socket, selects one for reading based on info avaialability
     */
     fd_set readfds;
     timeval t;
@@ -176,7 +181,7 @@ void procc_cmnd(int sock, vector<Room>* chatrooms, vector<Socket>* sockets)
         name = word;
     }
 
-    // data structure variables
+    //creates a room
     Reply reply;
     if (cmnd == "CREATE") {
         if (name == "create") {
@@ -203,7 +208,7 @@ void procc_cmnd(int sock, vector<Room>* chatrooms, vector<Socket>* sockets)
             }
         }   
     }
-    else if (cmnd == "DELETE") {
+    else if (cmnd == "DELETE") { // deletes a room
         string warning = "Warning:the chatting room is going to be closed...";
         
         if (chatrooms->size() == 0) {
@@ -228,7 +233,7 @@ void procc_cmnd(int sock, vector<Room>* chatrooms, vector<Socket>* sockets)
             }
         }
     }
-    else if (cmnd == "JOIN"){
+    else if (cmnd == "JOIN"){ //joins the sock (client) to the room, launches handler thread
         if (chatrooms->size() == 0) {
             reply.status = FAILURE_NOT_EXISTS;
             sendtoclient(sock, reply);
@@ -255,7 +260,7 @@ void procc_cmnd(int sock, vector<Room>* chatrooms, vector<Socket>* sockets)
             }
         }
     }
-    else if (cmnd == "LIST"){
+    else if (cmnd == "LIST"){ //replies with a list of all available rooms
         string list = "";
         if (chatrooms->size() == 0) {
             reply.status = SUCCESS;
@@ -291,7 +296,7 @@ void sendtoclient(int sockfd, Reply reply)
 	}
 }
 
-void createRoom(string name, vector<Room>* chatrooms, vector<Socket>* sockets) {
+void createRoom(string name, vector<Room>* chatrooms, vector<Socket>* sockets) { //std socket, struct, bind, listen calls for socket creation;
     Room room;
     room.name = name;
 
