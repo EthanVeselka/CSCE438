@@ -64,7 +64,7 @@ mutex mu_;
 
 string dir; // default directory for context files
 string def = "0.0.0.0:";
-string port = "50051";
+string port = "9020";
 string cip = "localhost";
 string cp = "9000";
 string id = "0";
@@ -77,8 +77,6 @@ void writeToTimeline(string name, Message &msg) {
   ofstream file;
   string message;
   time_t time = google::protobuf::util::TimeUtil::TimestampToTimeT(msg.timestamp());
-  // string t_str(std::ctime(&time));
-  // t_str[t_str.size()-1] = '\0';
   file.open(dir + name + "timeline.txt", ios::app);
   if (file) {
     file << msg.username() << endl;
@@ -86,6 +84,54 @@ void writeToTimeline(string name, Message &msg) {
     file << msg.msg();
   }
   file.close();
+
+  file.open(dir + name + "newposts.txt", ios::app);
+  if (file) {
+    file << msg.username() << endl;
+    file << time << endl;
+    file << msg.msg();
+  }
+  file.close();
+}
+
+vector<Message> getMessages(string name) {
+    vector<Message> posts;
+    string message;
+    string uname;
+    string time;
+    time_t t;
+    Timestamp timestamp;
+    Message msg;
+
+    ifstream file;
+    file.open(dir + name + "updates.txt");
+    int count = 0;
+    while(!file.eof()) {
+        getline(file, uname);
+        if (uname == "") {
+            break;
+        }
+        getline(file, time);
+        getline(file, message);
+
+        msg.set_username(uname);
+        msg.set_msg(message);
+
+        stringstream ss(time);
+        ss >> t;
+        timestamp = google::protobuf::util::TimeUtil::TimeTToTimestamp(t);
+        
+        msg.set_allocated_timestamp(&timestamp);
+        posts.push_back(msg);
+        msg.release_timestamp();
+        ++count;
+    }
+    file.close();
+
+    ofstream ofile;
+    ofile.open(dir + name + "updates.txt");   // erase contents of file
+    ofile.close();
+    return posts;
 }
 
 void saveClientState(grpc::string_ref name) {
@@ -95,70 +141,8 @@ void saveClientState(grpc::string_ref name) {
       all_usersv.erase(all_usersv.begin() + i);
     }
   }
-
-//   // update follower file with current followers
-//   ofstream file;
-//   for (int i = 0; i < users.size(); ++i) {
-//     if (users[i].username == name) {
-//       file.open(dir + users[i].username  + "followers.txt");
-//       if (file) {
-//         for (int j = 0; j < users[i].followed_by.size(); ++j) {  
-//           file << users[i].followed_by[j];
-//         }
-//       }
-//       file.close();
-//     }
-//   }
-
-//   //update list of users this client follows with current list
-//   for (int i = 0; i < users.size(); ++i) {
-//     if (users[i].username == name) {
-//       file.open(dir + users[i].username  + "following.txt");
-//       if (file) {
-//         for (int j = 0; j < users[i].is_following.size(); ++j) {  
-//           file << users[i].is_following[j];
-//         }
-//       }
-//       file.close();
-//     }
-//   }
-// }
-
-// user relog(string name) {   //create user struct and populate user struct
-  
-//   user newuser;               
-//   newuser.username = name;     
-  
-//   ifstream ifile;
-//   ifile.open(dir + name + "followers.txt");
-//   if (ifile) {
-//     string user;
-//     while(getline(ifile, user)) {
-//       newuser.followed_by.push_back(user);
-//     }
-//     ifile.close();
-//   }
-//   else {
-//     ofstream newfile(dir + name + "followers.txt");
-//     newfile.close();
-//   }
-
-//   ifile.open(dir + name + "following.txt");
-//   if (ifile) {
-//     string user;
-//     while(getline(ifile, user)) {
-//       newuser.is_following.push_back(user);
-//     }
-//     ifile.close();
-//   }
-//   else {
-//     ofstream newfile(dir + name + "following.txt");
-//     newfile.close();
-//   }
-
-//   newuser.newposts = false;
-//   return newuser;
 }
+
 
 void saveServerState() {
   //save users data structure to file
@@ -174,74 +158,54 @@ void saveServerState() {
   }
   file.close();
 
-  // copy current followers
-  // for (int i = 0; i < users.size(); ++i) {
-  //   file.open(dir + users[i].username  + "followers.txt");
-  //   if (file) {
-  //     for (int j = 0; j < users[i].followed_by.size(); ++j) {
-  //       if (j == users[i].followed_by.size() - 1) {
-  //         file << users[i].followed_by[j];
-  //         break;
-  //       }
-  //       file << users[i].followed_by[j] << endl;
-  //     }
-  //   }
-  //   file.close();
-  // }
-
-  // //copy list of users this client follows
-  // for (int i = 0; i < users.size(); ++i) {
-  //   file.open(dir + users[i].username  + "following.txt");
-  //   if (file) {
-  //     for (int j = 0; j < users[i].is_following.size(); ++j) {  
-  //       if (j == users[i].is_following.size() - 1) {
-  //         file << users[i].is_following[j];
-  //         break;
-  //       }
-  //       file << users[i].is_following[j] << endl;
-  //     }
-  //   }
-  //   file.close();
-  // }
 }
 
-void initServer() {
+// void initServer() {
 
-  FILE* file;
-  string fname = dir + "users.txt";
-  file = fopen(fname.c_str(), "r");
-  if (file == NULL) {
-    return;
-  }
+//   // FILE* file;
+//   // string fname = dir + "users.txt";
+//   // file = fopen(fname.c_str(), "r");
+//   // if (file == NULL) {
+//   //   return;
+//   // }
 
-  unique_lock<mutex> lock(mu_);
-  //recreate the user struct vector from file data
-  ifstream followers_file;
-  ifstream following_file;
-  ifstream userstream;
-  string username;
-  userstream.open(dir + "users.txt");
-  while(!userstream.eof()) {
-    user user;
-    getline(userstream, username);
-    user.username = username;
-    // followers_file.open(dir + username  + "followers.txt");
-    // following_file.open(dir + username  + "following.txt");
-    // while(!followers_file.eof()) {
-    //   getline(followers_file, username);
-    //   if (username != "") { user.followed_by.push_back(username);}
-    //   else { break;}
-    // }
-    // while(!following_file.eof()) {
-    //   getline(following_file, username);
-    //   if (username != "") { user.is_following.push_back(username);}
-    //   else { break;}
-    // }
-    // followers_file.close();
-    // following_file.close();
-    users.push_back(user);
+//   // unique_lock<mutex> lock(mu_);
+//   // //recreate the user struct vector from file data
+//   // ifstream followers_file;
+//   // ifstream following_file;
+//   // ifstream userstream;
+//   // string username;
+//   // userstream.open(dir + "users.txt");
+//   // while(!userstream.eof()) {
+//   //   user user;
+//   //   getline(userstream, username);
+//   //   user.username = username;
+//   //   users.push_back(user);
+//   // }
+//   // users.pop_back();
+
+//   // ofstream ofile;
+//   // for (int i = 0; i < users.size(); ++i) {
+//   //   ofile.open(dir + users[i].username + "updates.txt");   // erase contents of file
+//   //   ofile.close();
+//   // }
+
+// }
+
+vector<string> populateLocal() {
+  ifstream file;
+  string user;
+  vector<string> all;
+  file.open(dir + "users.txt");
+  while(!file.eof()) {
+    getline(file, user);
+    all.push_back(user);
+    if (user == "") {break;}
   }
-  users.pop_back();
+  all.pop_back();
+  file.close();
+
+  return all;
 }
 
 vector<string> populateAll() {
@@ -330,7 +294,6 @@ class SNSServiceImpl final : public SNSService::Service {
 
       //contact coordinator first then connect to the server cluster as done here
       grpc::Status status = servstub_->Follow(&context, requestCopy, &replyCopy);
-      // if (!status.ok()) { cout << "copy follow failed" << endl;}
     }
 
     //if we find user requested, add request user to that user's list of followers
@@ -392,7 +355,6 @@ class SNSServiceImpl final : public SNSService::Service {
 
       //contact coordinator first then connect to the server cluster as done here
       grpc::Status status = servstub_->UnFollow(&context, requestCopy, &replyCopy);
-      // if (!status.ok()) { cout << "copy unfollow failed" << endl;}
     }
 
     //if we find user requested, remove request user from that user's list of followers
@@ -437,34 +399,44 @@ class SNSServiceImpl final : public SNSService::Service {
     // ------------------------------------------------------------
     
     //if this is master, forward call to secondary server
-    if (t[0] == 'm') {
-      grpc::ClientContext coordcontext;
-      grpc::ClientContext context;
-      Request requestCopy;
-      Reply replyCopy;
-      requestCopy.CopyFrom(*request);
-    
-      if (servstub_ == NULL) {
-        ClusterId cluster;
-        cluster.set_cluster(stoi(id));
-        Server s;
-        grpc::Status status1 = coordstub_->GetSlave(&coordcontext, cluster, &s);
-        servstub_ = SNSService::NewStub(CreateChannel(s.server_ip() + ":" + s.port_num(), grpc::InsecureChannelCredentials()));
-        // cout << "getting slave at " << s.server_ip() << ":" << s.port_num() << endl;
-      }
-
-      grpc::Status status2 = servstub_->Login(&context, requestCopy, &replyCopy);
-      // if (!status2.ok()) { cout << "copy login failed" << endl;}
-    }
 
     unique_lock<mutex> lock(mu_);
+    Status status;
+    bool l = false;
+    bool global = false;
     vector<string> all = populateAll();
-    for (string user : all) {                  // check if user exists already (username is taken)
+    
+    for (string user : all) {
       if (request->username() == user) {
-        Status status = Status(grpc::StatusCode::ALREADY_EXISTS, NULL);
-        return status;
+        status = Status(grpc::StatusCode::ALREADY_EXISTS, NULL);
+        global = true;
       }
     }
+
+    if (t[1] = 'l') {
+        vector<string> local = populateLocal();
+        for (int i = 0; i < local.size(); ++i) {
+          if (local[i] == request->username()) {
+            l = true;
+          }
+        }
+    }
+
+    if (global && !l) {
+      return status;
+    }
+    else {
+      ofstream file;
+      file.open(dir + "users.txt", ios::app);
+      file << request->username() << endl;
+      file.close();
+
+      user newuser;
+      newuser.username = request->username();     //only recreate user struct from data if it does not exist
+      users.push_back(newuser);                   //add user to global vector of user structs
+      all_usersv.push_back(request->username());
+    }
+
 
     FILE* file;
     string fname = dir + request->username() + "timeline.txt";
@@ -487,6 +459,25 @@ class SNSServiceImpl final : public SNSService::Service {
         newfile.close();
         all_usersv.push_back(request->username());  //add user to list of all users
       }
+    }
+
+
+    if (t[0] == 'm') {
+      grpc::ClientContext coordcontext;
+      grpc::ClientContext context;
+      Request requestCopy;
+      Reply replyCopy;
+      requestCopy.CopyFrom(*request);
+    
+      if (servstub_ == NULL) {
+        ClusterId cluster;
+        cluster.set_cluster(stoi(id));
+        Server s;
+        grpc::Status status1 = coordstub_->GetSlave(&coordcontext, cluster, &s);
+        servstub_ = SNSService::NewStub(CreateChannel(s.server_ip() + ":" + s.port_num(), grpc::InsecureChannelCredentials()));
+      }
+
+      grpc::Status status2 = servstub_->Login(&context, requestCopy, &replyCopy);
     }
 
     
@@ -514,16 +505,6 @@ class SNSServiceImpl final : public SNSService::Service {
           if (msg.username() == users[i].username) { 
             //write to user[i]'s timeline file
             writeToTimeline(users[i].username, msg);
-            // for (int j = 0; j < users[i].followed_by.size(); ++j) {  //iterate through all users this one is followed by
-            //   //write to users[i].followed_by[j]'s timeline file 
-            //   writeToTimeline(users[i].followed_by[j], msg);
-            //   for (int w = 0; w < users.size(); ++w) {               //find each of those users
-            //     if (users[i].followed_by[j] == users[w].username) {  //add the new post to the followers list of new posts
-            //       users[w].new_posts.push_back(msg);
-            //       users[w].newposts = true;                          
-            //     }
-            //   }
-            // }
           }
         }
       }
@@ -540,6 +521,7 @@ class SNSServiceImpl final : public SNSService::Service {
       ifstream file;
       string message;
       string name;
+      string n;
       string time;
       time_t t;
       Timestamp timestamp;
@@ -547,6 +529,7 @@ class SNSServiceImpl final : public SNSService::Service {
       vector<Message> msgvector;
       for (int i = 0; i < users.size(); ++i) {
         if (users[i].username == uname) {
+          n = users[i].username;
           unique_lock<mutex> lock(mu_);
           file.open(dir + users[i].username + "timeline.txt");
           if (file) {
@@ -579,8 +562,6 @@ class SNSServiceImpl final : public SNSService::Service {
               msgvector.pop_back();
             }
           }
-          users[i].new_posts.clear();
-          users[i].newposts = false;
           file.close();
         }
       }
@@ -601,6 +582,27 @@ class SNSServiceImpl final : public SNSService::Service {
       //     break;
       //   }
       // }
+      ofstream ofile;
+      ofile.open(dir + n + "updates.txt");   // erase contents of file
+      ofile.close();
+        
+      while(true) {
+        for (int i = 0; i < users.size(); ++i) {
+          if (users[i].username == uname) {
+            unique_lock<mutex> lock(mu_);
+            vector<Message> messages = getMessages(users[i].username);
+            for (int j = 0; j < messages.size(); ++j) {
+              Message m;
+              m.CopyFrom(messages[j]);
+              stream->Write(m);
+            }
+          }
+        }
+        if (!stream->Write(test)) {
+          break;
+        }
+        sleep(1);
+      }
     });
     
     clientReader.join();
@@ -636,7 +638,7 @@ void RunServer(std::string port_no) {
   builder.AddListeningPort(port_no, grpc::InsecureServerCredentials());
   builder.RegisterService(&service);
   unique_ptr<grpc::Server> server(builder.BuildAndStart());
-  initServer();
+  // initServer();
   saveServerState();
   cout << "Server listening on port: " << port_no << endl;
 

@@ -56,14 +56,19 @@ using snsFollowSync::Post;
 
 using namespace std;
 
+int hb = 1;
+
 struct table{
     Server server;
     int status;
 };
 
-vector<table> mservers;
-vector<table> sservers;
-vector<table> synchronizers;
+table mservers[5] = {};
+table sservers[5] = {};
+table synchronizers[5] = {};
+// vector<table> mservers;
+// vector<table> sservers;
+// vector<table> synchronizers;
 vector<int> all_users;
 mutex mu_;
 
@@ -91,32 +96,27 @@ class SNSCoordinatorImpl final : public SNSCoordinator::Service {
         t.status = 1;
         
         bool found = false;
+        int i = t.server.server_id();
         if (t.server.server_type() == 0) {
-            for (int i = 0; i < mservers.size(); ++i) { 
-                if (mservers[i].server.server_id() == t.server.server_id()) {
-                    mservers[i].status = 1;   // master reactivated
-                    found = true;
-                }
+            if (mservers[i].server.server_ip() == t.server.server_ip()) {
+                mservers[i].status = 1;   // master reactivated
+                found = true;
             }
-            if (!found) { mservers.push_back(t);}
+            if (!found) { mservers[i] = t;}
         }
         else if (t.server.server_type() == 1) {
-            for (int i = 0; i < sservers.size(); ++i) { 
-                if (sservers[i].server.server_id() == t.server.server_id()) { found = true;}
-            }
-            if (!found) { sservers.push_back(t);}
+            if (sservers[i].server.server_ip() == t.server.server_ip()) { found = true;}
+            if (!found) { sservers[i] = t;}
         }
         else if (t.server.server_type() == 2) {
-            for (int i = 0; i < synchronizers.size(); ++i) { 
-                if (synchronizers[i].server.server_id() == t.server.server_id()) { found = true;}
-            }
-            if (!found) { synchronizers.push_back(t);}
+            if (synchronizers[i].server.server_ip() == t.server.server_ip()) { found = true;}
+            if (!found) { synchronizers[i] = t;}
         }
-        cout << "connected with server " << t.server.server_type() << ":" << t.server.server_id()  << endl;
+        // cout << "connected with server " << t.server.server_type() << ":" << t.server.server_id()  << endl;
         
         // Heartbeat ping;
         while(stream->Read(&ping)) {
-            sleep(1);
+            sleep(hb);
             if (!stream->Write(ping)) {
                 int idx = ping.server_id();
                 if (t.server.server_type() == 0) { 
@@ -207,11 +207,15 @@ int main(int argc, char** argv) {
     
     string def = "0.0.0.0:";
     string port = "9000";
+
     int opt = 0;
-    while ((opt = getopt(argc, argv, "p:")) != -1){
+    while ((opt = getopt(argc, argv, "p:h:")) != -1){
         switch(opt) {
             case 'p':
                 port = optarg;
+                break;
+            case 'h':
+                hb = stoi(optarg);
                 break;
             default:
                 cerr << "Invalid Command Line Argument\n";

@@ -57,6 +57,8 @@ using snsFollowSync::Reply;
 
 using namespace std;
 
+int hb = 1;
+
 
 struct syncron{
     string ip;
@@ -85,6 +87,63 @@ string id = "0";
 unique_ptr<snsFollowSync::SNSFollowSync::Stub> syncstub_;
 unique_ptr<snsCoordinator::SNSCoordinator::Stub> coordstub_;
 
+// string name, string msg, Timestamp t
+void writeToTimeline(Post post) {
+    // Post post;
+    unique_lock<mutex> lock(mu_);
+    ofstream file;
+    string message;
+    time_t time = google::protobuf::util::TimeUtil::TimestampToTimeT(post.timestamp());
+    file.open(ma_dir + to_string(post.follower_user()) + "timeline.txt", ios::app); //write to master copy
+    if (file) {
+        file << post.posted_by() << endl;
+        file << time << endl;
+        file << post.msg() << endl;
+    }
+    file.close();
+
+    file.open(sl_dir + to_string(post.follower_user()) + "timeline.txt", ios::app); //write to slave copy
+    if (file) {
+        file << post.posted_by() << endl;
+        file << time << endl;
+        file << post.msg() << endl;
+    }
+    file.close();
+
+    file.open(ma_dir + to_string(post.follower_user()) + "updates.txt", ios::app);  //write to master copy
+    if (file) {
+        file << post.posted_by() << endl;
+        file << time << endl;
+        file << post.msg() << endl;
+    }
+    file.close();
+
+    file.open(sl_dir + to_string(post.follower_user()) + "updates.txt", ios::app); //write to slave copy
+    if (file) {
+        file << post.posted_by() << endl;
+        file << time << endl;
+        file << post.msg() << endl;
+    }
+    file.close();
+    mu_.unlock();
+}
+
+
+vector<string> populateLocal() {
+  ifstream file;
+  string user;
+  vector<string> all;
+  file.open(dir + "users.txt");
+  while(!file.eof()) {
+    getline(file, user);
+    all.push_back(user);
+    if (user == "") {break;}
+  }
+  all.pop_back();
+  file.close();
+
+  return all;
+}
 
 vector<string> populateAll() {
   ifstream file;
@@ -134,6 +193,67 @@ vector<string> populateFollowing(string username) {
   return following;
 }
 
+vector<Post> getPosts(string name, int tm) {
+    Post post;
+    vector<Post> posts;
+    string message;
+    string uname;
+    string time;
+    time_t t;
+    Timestamp timestamp;
+
+    ifstream file;
+    if (tm == 0) { file.open(ma_dir + name + "newposts.txt");}
+    else if (tm == 1) { file.open(sl_dir + name + "newposts.txt");}
+    while(!file.eof()) {
+        getline(file, uname);
+        if (uname == "") {
+            break;
+        }
+        getline(file, time);
+        getline(file, message);
+
+        post.set_posted_by(stoi(uname));
+        post.set_msg(message);
+        // post.set_follower_user(follower);
+
+        stringstream ss(time);
+        ss >> t;
+        timestamp = google::protobuf::util::TimeUtil::TimeTToTimestamp(t);
+        
+        post.set_allocated_timestamp(&timestamp);
+        posts.push_back(post);
+        post.release_timestamp();
+    }
+    file.close();
+
+    ofstream ofile;
+    ofile.open(ma_dir + name + "newposts.txt");   // erase contents of file
+    ofile.close();
+
+    ofile.open(sl_dir + name + "newposts.txt");   // erase contents of file
+    ofile.close();
+    return posts;
+}
+
+void syncNewPosts() {
+    ofstream file;
+    time_t time;
+    vector<string> local = populateLocal();
+    for (int i = 0; i < local.size(); ++i) {
+        vector<Post> posts = getPosts(local[i], 0);
+        file.open(sl_dir + local[i] + "newposts.txt");
+        for (int j = 0; j < posts.size(); ++j) {
+            time = google::protobuf::util::TimeUtil::TimestampToTimeT(posts[j].timestamp());
+            file << posts[j].posted_by() << endl;
+            file << time << endl;
+            file << posts[j].msg() << endl;
+        }
+        file.close();
+    }
+
+}
+
 
 class SNSFollowSyncImpl final : public SNSFollowSync::Service {
 
@@ -174,47 +294,32 @@ class SNSFollowSyncImpl final : public SNSFollowSync::Service {
 
     Status SyncTimeline(ServerContext* context, const Post* post, Reply* reply) {
         // write post from a user to timeline of specified local follower in post
-        unique_lock<mutex> lock(mu_);
+        Post post0;
+        post0.CopyFrom(*post);
+        writeToTimeline(post0);
+
         return Status::OK;
     }
 };
 
-void SyncRelationsLocal(Relation relation) {  //local version of rpc call, for local follows that don't require external call
-    // unique_lock<mutex> lock(mu_);
-    //vet if relation already exists, if not, edit file
-    vector<string> followers = populateFollowers(to_string(relation.followee()));
-    for (int i = 0; i < followers.size(); ++i) {
-        if (followers[i] == to_string(relation.follower())) {
-            return;
-        }
-    }
-
-    ofstream file;
-    file.open(sl_dir + to_string(relation.followee()) + "followers.txt", ios::app);
-    file << to_string(relation.follower()) << endl;
-    file.close();
-
-    file.open(ma_dir + to_string(relation.followee()) + "followers.txt", ios::app);
-    file << to_string(relation.follower()) << endl;
-    file.close();
-
-    Relation rel;              //add to list of relations we are aware of
-    rel.CopyFrom(relation);
-    relations.push_back(rel);
-}
 
 void map_syncs() {  //creates map of users to their respective follower synchronizers
+    //recreate map
     for (int i = 0; i < syncs.users_size(); ++i) {
+        if (user_syncs.count(syncs.users()[i]) != 0) {
+            continue;
+        }
         syncron s;
         s.ip = syncs.follow_sync_ip()[i];
         s.port = syncs.port_nums()[i];
+        // cout << "user: " << syncs.users()[i] << " port: " << s.port << endl;
         user_syncs.insert({syncs.users()[i], s});
     }
 
 }
 
 void updateUsers() {   //updates the local copy of list of all users based on coordinator's list
-    unique_lock<mutex> lock(mu_);
+    // unique_lock<mutex> lock(mu_);
     grpc::ClientContext context;
     ClusterId cl;
     snsCoordinator::Users users;
@@ -225,7 +330,7 @@ void updateUsers() {   //updates the local copy of list of all users based on co
     string username;
     
     all_users.clear();
-    // get all current users and update local vector of
+    // get all current users and update local vector
     userstream.open(sl_dir + "allusers.txt");         //slave copy
     for (int i = 0; i < users.users_size(); ++i) {
         userstream << to_string(users.users()[i]) << endl;
@@ -256,6 +361,70 @@ void updateUsers() {   //updates the local copy of list of all users based on co
     }
 }
 
+void syncRelationsLocal(Relation relation) {  //local version of rpc call, for local follows that don't require external call
+    // unique_lock<mutex> lock(mu_);
+    //vet if relation already exists, if not, edit file
+    bool found = false;
+    vector<string> followers = populateFollowers(to_string(relation.followee()));
+    for (int i = 0; i < followers.size(); ++i) {
+        if (followers[i] == to_string(relation.follower())) {
+            // cout << "ignoring local sync" << endl;
+            return;
+        }
+    }
+    vector<string> local = populateLocal();
+    for (int i = 0; i < local.size(); ++i) {
+        if (local[i] == to_string(relation.followee())) {
+            // cout << "ignoring cause not local" << endl;
+            found = true;
+        }
+    }
+
+    if (!found) { return;}
+    // cout << "syncing locally" << endl;
+
+    ofstream file;
+    file.open(sl_dir + to_string(relation.followee()) + "followers.txt", ios::app);
+    file << to_string(relation.follower()) << endl;
+    file.close();
+
+    file.open(ma_dir + to_string(relation.followee()) + "followers.txt", ios::app);
+    file << to_string(relation.follower()) << endl;
+    file.close();
+
+    Relation rel;              //add to list of relations we are aware of
+    rel.CopyFrom(relation);
+    relations.push_back(rel);
+}
+
+void syncTimelines() {
+    grpc::ClientContext context;
+    Reply reply;
+    Status status;
+    //for each local user, see if there have been changes/updates, if there have, 
+    // write them to the corresponding relation
+    vector<string> local = populateLocal();
+    for (int i = 0; i < local.size(); ++i) {
+        vector<string> followers = populateFollowers(local[i]);  //get list of people following the local user
+        vector<Post> posts = getPosts(local[i], 1);
+        for (int j = 0; j < followers.size(); ++j) {
+            for (int n = 0; n < posts.size(); ++n) {
+                posts[n].set_follower_user(stoi(followers[j]));
+                grpc::ClientContext context;
+                Reply reply;
+                Status status;
+                auto it = user_syncs.find(stoi(followers[j]));
+                if (it->second.port != port) { 
+                    syncstub_ = SNSFollowSync::NewStub(CreateChannel(it->second.ip + ":" + it->second.port, grpc::InsecureChannelCredentials()));
+                    status = syncstub_->SyncTimeline(&context, posts[n], &reply);
+                }
+                else { writeToTimeline(posts[n]);}
+            }
+        }
+    }
+
+}
+
 void syncRelations() {  // synchronizes set of relations across clusters
 
     for (int i = 0; i < relations.size(); ++i) {
@@ -269,12 +438,14 @@ void syncRelations() {  // synchronizes set of relations across clusters
             syncstub_ = SNSFollowSync::NewStub(CreateChannel(it->second.ip + ":" + it->second.port, grpc::InsecureChannelCredentials()));
             status = syncstub_->SyncRelations(&context, relations[i], &reply);
         }
-        SyncRelationsLocal(relations[i]);
+        else {
+            syncRelationsLocal(relations[i]);
+        }
     }
 }
 
 void updateRelations() { //updates the relations vector (synchronized set of known relations across clusters)
-    unique_lock<mutex> lock(mu_);
+    // unique_lock<mutex> lock(mu_);
     grpc::ClientContext context;
     snsCoordinator::Users users;
     FollowSyncs fs;
@@ -312,10 +483,6 @@ void updateRelations() { //updates the relations vector (synchronized set of kno
     syncRelations();
 }
 
-void synchronize() {
-    //timeline stuff
-}
-
 //initializes synchronizer and launches heartbeat thread
 //hb thread updates state of all neccessary files every sleep(x) seconds, or immediately with no sleep(). 
 void RunSynchronizer(std::string port_no) {
@@ -351,7 +518,7 @@ void RunSynchronizer(std::string port_no) {
     stream->Write(ping);
     ping.release_timestamp();
     
-    thread update([&stream] () {  //thread for heartbeats to coordinator
+    thread update([&stream] () {  //thread for heartbeats to coordinator, synchronizes on sleep timer
         // unique_lock<mutex> lock(mu_);
         time_t time;
         Heartbeat ping;
@@ -362,11 +529,12 @@ void RunSynchronizer(std::string port_no) {
             ping.set_allocated_timestamp(&ts);
             if (!stream->Write(ping)) { break;}
             ping.release_timestamp();
-            
+            // cout << "relations size: " << relations.size() << endl;
             updateUsers(); //update list of all users
-            updateRelations(); //update relation set
-            
-            sleep(5);
+            updateRelations(); //update relation set and respective timelines
+            syncNewPosts();
+            syncTimelines();
+            sleep(hb);
         }
     });
     update.detach();
@@ -383,6 +551,7 @@ int main(int argc, char** argv) {
         else if (argv[i] == string("-cp") && i + 1 < argc) { cp = argv[++i];}
         else if (argv[i] == string("-p") && i + 1 < argc) { port = argv[++i];}
         else if (argv[i] == string("-id") && i + 1 < argc) { id = argv[++i];}
+        else if (argv[i] == string("-h") && i + 1 < argc) { hb = stoi(argv[++i]);}
         else {cerr << "Invalid Command Line Argument\n";}
     }
 

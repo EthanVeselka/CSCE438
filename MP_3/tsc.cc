@@ -44,6 +44,10 @@ using snsCoordinator::Heartbeat;
 
 using namespace std;
 
+vector<thread> threads;
+mutex mu_;
+bool threadRunning = false;
+
 class Client : public IClient
 {
     public:
@@ -59,11 +63,13 @@ class Client : public IClient
         virtual int reconnect();
 
     private:
+        Server server;
         std::string hostname;
         std::string username;
         std::string servport;
         std::string coordport;
         bool connected = false;
+        bool reconnected = false;
         
         // You can have an instance of the client stub
         // as a member variable.
@@ -102,6 +108,7 @@ int main(int argc, char** argv) {
 }
 
 int Client::reconnect() {
+    // unique_lock<mutex> lock(mu_);
     IReply ire;
     grpc::ClientContext context;
     User user;
@@ -109,8 +116,8 @@ int Client::reconnect() {
     Server server;
 
     //contact coordinator first then connect to the server cluster as done here
-
     grpc::Status status = coordstub_->GetServer(&context, user, &server);
+    this->server.set_server_type(server.server_type());
     ire.grpc_status = status;
     if (status.ok()) {
 
@@ -124,10 +131,28 @@ int Client::reconnect() {
         request.set_username(this->username);
         Reply reply;
 
+        if (this->server.server_type() == 0) {
+            cout << endl;
+            displayReConnectionMessage(this->hostname, this->servport);
+            this->reconnected = true;
+        }
+
         //contact coordinator first then connect to the server cluster as done here
         // status = servstub_->Login(&context, request, &reply);
         // ire.grpc_status = status;
-        displayReConnectionMessage(this->hostname, this->servport);
+
+        if (!threadRunning) {
+            displayReConnectionMessage(this->hostname, this->servport);
+            thread masterReconn([this] () {
+                while(!this->reconnected) {
+                    reconnect();
+                }
+                threadRunning = false;
+            });
+            threadRunning = true;
+            masterReconn.detach();
+        }
+
         return 1;
     } else {
         cout << "failed to reconnect" << endl;
@@ -151,6 +176,7 @@ int Client::connectTo()
     //contact coordinator first then connect to the server cluster as done here
 
     grpc::Status status = coordstub_->GetServer(&context, user, &server);
+
     ire.grpc_status = status;
     if (status.ok()) {
         // create server stub with new port and set client data members
@@ -168,7 +194,9 @@ int Client::connectTo()
         status = servstub_->Login(&context, request, &reply);
         ire.grpc_status = status;
         
-        if (!status.ok()) {cout << "Failed to log in" << endl;}
+        if (!status.ok()) {
+            return -1;
+        }
         displayReConnectionMessage(this->hostname, this->servport);
         this->connected = true;
         return 1;
@@ -236,8 +264,13 @@ IReply Client::processCommand(std::string& input)
             }
         }
     }
-    else if (cmnd == "TIMELINE") {
+    else if (cmnd == "TIMELINE") { //if timeline exits then reprompt
+        grpc::Status status;
         processTimeline();
+        connectTo();
+        ire.grpc_status = status.OK;
+        ire.comm_status = FAILURE_DISCONNECTED;
+        return ire;
     }
     else if (cmnd == "FOLLOW") {
         request.add_arguments(name);
@@ -342,7 +375,11 @@ void Client::processTimeline()
         time = chrono::system_clock::to_time_t(now);
         Timestamp t = google::protobuf::util::TimeUtil::TimeTToTimestamp(time);
         msg.set_allocated_timestamp(&t);
-        stream->Write(msg);             //write to stream
+        if (!stream->Write(msg)) { //write to stream
+            cout << "Disconnected..." << endl;
+            msg.release_timestamp();
+            break;
+        }
         msg.release_timestamp();
     }
 }
