@@ -20,6 +20,7 @@
 #include "sns.grpc.pb.h"
 #include "snsCoordinator.grpc.pb.h"
 
+#include<glog/logging.h>
 #define log(severity, msg) LOG(severity) << msg; google::FlushLogFiles(google::severity);
 
 using google::protobuf::Timestamp;
@@ -77,13 +78,6 @@ void writeToTimeline(string name, Message &msg) {
   ofstream file;
   string message;
   time_t time = google::protobuf::util::TimeUtil::TimestampToTimeT(msg.timestamp());
-  file.open(dir + name + "timeline.txt", ios::app);
-  if (file) {
-    file << msg.username() << endl;
-    file << time << endl;
-    file << msg.msg();
-  }
-  file.close();
 
   file.open(dir + name + "newposts.txt", ios::app);
   if (file) {
@@ -265,6 +259,7 @@ class SNSServiceImpl final : public SNSService::Service {
     // all_users & following_users are populated
     // ------------------------------------------------------------
     //add all users to reply
+    log(INFO,"Serving List Request");
     vector<string> all = populateAll();
     vector<string> followers = populateFollowers(request->username());
     for (int i = 0; i < all.size(); ++i) {
@@ -273,7 +268,7 @@ class SNSServiceImpl final : public SNSService::Service {
     for (int i = 0; i < followers.size(); ++i) {
       reply->add_following_users(followers[i]);
     }
-    reply->add_following_users(request->username());
+    // reply->add_following_users(request->username());
     saveServerState();
     return Status::OK;
   }
@@ -286,7 +281,9 @@ class SNSServiceImpl final : public SNSService::Service {
     // ------------------------------------------------------------
 
     //if this is master, forward call to secondary server
+    log(INFO,"Serving Follow Request");
     if (t[0] == 'm') {
+      log(INFO,"Master forwarding follow request");
       grpc::ClientContext context;
       Request requestCopy;
       Reply replyCopy;
@@ -345,9 +342,10 @@ class SNSServiceImpl final : public SNSService::Service {
     // request from a user to unfollow one of his/her existing
     // followers
     // ------------------------------------------------------------
-
+    log(INFO,"Serving Unfollow Request");
     //if this is master, forward call to secondary server
     if (t[0] == 'm') {
+      log(INFO,"Master forwarding unfollow request");
       grpc::ClientContext context;
       Request requestCopy;
       Reply replyCopy;
@@ -398,8 +396,7 @@ class SNSServiceImpl final : public SNSService::Service {
     // or already taken
     // ------------------------------------------------------------
     
-    //if this is master, forward call to secondary server
-
+    log(INFO,"Serving Login Request");
     unique_lock<mutex> lock(mu_);
     Status status;
     bool l = false;
@@ -452,7 +449,7 @@ class SNSServiceImpl final : public SNSService::Service {
         if (users[i].username == request->username())
           found = true;
       }
-      if (!found) {  
+      if (!found) {
         user newuser;
         newuser.username = request->username();     //only recreate user struct from data if it does not exist
         users.push_back(newuser);                   //add user to global vector of user structs
@@ -461,8 +458,20 @@ class SNSServiceImpl final : public SNSService::Service {
       }
     }
 
+    bool following = false;
+    vector<string> followers = populateFollowers(request->username());
+    for (string follower : followers)
+      if (follower == request->username()) { following = true;}
+    if (!following) {
+      ofstream ofile;
+      ofile.open(dir + request->username() + "followers.txt", ios::app);
+      ofile << request->username() << endl;
+      ofile.close();
+    }
 
+    //if this is master, forward call to secondary server
     if (t[0] == 'm') {
+      log(INFO,"Master forwarding login request");
       grpc::ClientContext coordcontext;
       grpc::ClientContext context;
       Request requestCopy;
@@ -492,6 +501,7 @@ class SNSServiceImpl final : public SNSService::Service {
     // ------------------------------------------------------------
     
     //add new stream object to list of following streams for each user this user follows
+    log(INFO,"Serving timeline request");
     std::multimap<grpc::string_ref, grpc::string_ref> metadata = context->client_metadata();
     auto auth = metadata.find("user");
     auto uname = auth->second;
@@ -610,6 +620,7 @@ class SNSServiceImpl final : public SNSService::Service {
     
     
     saveClientState(uname);
+    log(INFO,"Client disconnected, saving state, returning");
     // deletes user from list of user so they can log back in, if disconnected, maintains follow/followed list
 
     return Status::OK;
@@ -623,6 +634,7 @@ void RunServer(std::string port_no) {
   // which would start the server, make it listen on a particular
   // port number.
   // ------------------------------------------------------------
+  log(INFO,"Launching Server");
   if (t[0] == 'm') {
     dir = "master_" + id + "/";
     mkdir(("master_" + id).c_str(), 0777);
@@ -666,6 +678,7 @@ void RunServer(std::string port_no) {
   stream->Write(ping);
   ping.release_timestamp();
   
+  log(INFO,"Initiating Heartbeats to coordinator");
   thread writer([&stream] () {
       // unique_lock<mutex> lock(mu_);
       time_t time;
@@ -697,6 +710,9 @@ int main(int argc, char** argv) {
     else {cerr << "Invalid Command Line Argument\n";}
   }
 
+  std::string log_file_name = std::string("server-") + port;
+  google::InitGoogleLogging(log_file_name.c_str());
+  log(INFO, "Logging Initialized. Server starting...");
   RunServer(def + port);
   // contact coordinator and register server
   return 0;

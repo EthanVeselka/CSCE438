@@ -6,11 +6,11 @@ CXXFLAGS += -std=c++11
 ifeq ($(SYSTEM),Darwin)
 LDFLAGS += -L$(MY_INSTALL_DIR)/lib `pkg-config --libs protobuf grpc++ grpc`\
            -lgrpc++_reflection\
-           -ldl
+           -ldl -lglog
 else
 LDFLAGS += -L$(MY_INSTALL_DIR)/lib `pkg-config --libs protobuf grpc++ grpc`\
            -Wl,--no-as-needed -lgrpc++_reflection -Wl,--as-needed\
-           -ldl
+           -ldl -lglog
 endif
 PROTOC = protoc
 GRPC_CPP_PLUGIN = grpc_cpp_plugin

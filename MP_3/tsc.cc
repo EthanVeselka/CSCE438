@@ -16,6 +16,7 @@
 #include "snsCoordinator.grpc.pb.h"
 #include "time.h"
 
+#include<glog/logging.h>
 #define log(severity, msg) LOG(severity) << msg; google::FlushLogFiles(google::severity);
 
 using google::protobuf::Timestamp;
@@ -101,7 +102,10 @@ int main(int argc, char** argv) {
     }
 
     Client myc(cip, id, cp);
+    std::string log_file_name = std::string("client-") + id;
+    google::InitGoogleLogging(log_file_name.c_str());
     // You MUST invoke "run_client" function to start business logic
+    log(INFO, "Logging Initialized. Client starting...");
     myc.run_client();
 
     return 0;
@@ -132,9 +136,11 @@ int Client::reconnect() {
         Reply reply;
 
         if (this->server.server_type() == 0) {
+            log(INFO, "Reconnected to master server");
             cout << endl;
             displayReConnectionMessage(this->hostname, this->servport);
             this->reconnected = true;
+            return 1;
         }
 
         //contact coordinator first then connect to the server cluster as done here
@@ -152,7 +158,7 @@ int Client::reconnect() {
             threadRunning = true;
             masterReconn.detach();
         }
-
+        log(INFO, "Reconnected to slave server");
         return 1;
     } else {
         cout << "failed to reconnect" << endl;
@@ -166,6 +172,7 @@ int Client::connectTo()
 {
     // create new stub with hostname and port
     if (this->connected) { return reconnect();}
+    log(INFO, "Connecting to coordinator");
     this->coordstub_ = SNSCoordinator::NewStub(CreateChannel(this->hostname + ":" + this->coordport, grpc::InsecureChannelCredentials()));
     IReply ire;
     grpc::ClientContext context;
@@ -180,6 +187,7 @@ int Client::connectTo()
     ire.grpc_status = status;
     if (status.ok()) {
         // create server stub with new port and set client data members
+        log(INFO, "Connecting to master server");
         this->hostname = server.server_ip();
         this->servport = server.port_num();
         this->servstub_ = SNSService::NewStub(CreateChannel(this->hostname + ":" + this->servport, grpc::InsecureChannelCredentials()));
@@ -234,7 +242,7 @@ IReply Client::processCommand(std::string& input)
         }
     }
 
-
+    log(INFO, "Processing "+input);
     if (cmnd == "LIST") {
         grpc::Status status = servstub_->List(&context, request, &reply);
         ire.grpc_status = status;
@@ -267,6 +275,7 @@ IReply Client::processCommand(std::string& input)
     else if (cmnd == "TIMELINE") { //if timeline exits then reprompt
         grpc::Status status;
         processTimeline();
+        log(INFO, "Timeline returned due to disconnect");
         connectTo();
         ire.grpc_status = status.OK;
         ire.comm_status = FAILURE_DISCONNECTED;
@@ -342,7 +351,7 @@ void Client::processTimeline()
     // CTRL-C (SIGINT)
 	// ------------------------------------------------------------
     
-    
+    log(INFO, "Timeline processing");
     grpc::ClientContext context;
     grpc::Status status;
     Message msg;

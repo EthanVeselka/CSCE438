@@ -22,6 +22,7 @@
 #include "snsFollowSync.grpc.pb.h"
 #include "time.h"
 
+#include<glog/logging.h>
 #define log(severity, msg) LOG(severity) << msg; google::FlushLogFiles(google::severity);
 
 using google::protobuf::Timestamp;
@@ -63,17 +64,16 @@ struct table{
     int status;
 };
 
+//these are the arrays of server clusters, change size to change cluster limit
 table mservers[5] = {};
 table sservers[5] = {};
 table synchronizers[5] = {};
-// vector<table> mservers;
-// vector<table> sservers;
-// vector<table> synchronizers;
 vector<int> all_users;
 mutex mu_;
 
 class SNSCoordinatorImpl final : public SNSCoordinator::Service {
     Status HandleHeartBeats(ServerContext* context, ServerReaderWriter<Heartbeat, Heartbeat>* stream) {
+        log(INFO,"Serving HandleHeartBeats request");
         
         Heartbeat ping;
         ServerType st;
@@ -115,6 +115,7 @@ class SNSCoordinatorImpl final : public SNSCoordinator::Service {
         // cout << "connected with server " << t.server.server_type() << ":" << t.server.server_id()  << endl;
         
         // Heartbeat ping;
+        log(INFO,"Initiating Heartbeats with server");
         while(stream->Read(&ping)) {
             sleep(hb);
             if (!stream->Write(ping)) {
@@ -128,11 +129,12 @@ class SNSCoordinatorImpl final : public SNSCoordinator::Service {
                 break;
             }
         }
-        
+        log(INFO,"Server disconnected");
         return Status::OK;
     }
 
     Status GetFollowSyncsForUsers(ServerContext* context, const Users* users, FollowSyncs* followSyncs) {
+        log(INFO,"Serving GetFollowSyncsForUsers request");
         for (int i = 0; i < users->users_size(); ++i) {
             int sid = -1;
             if ((users->users()[i] % 3) + 1 != -1) {
@@ -147,6 +149,7 @@ class SNSCoordinatorImpl final : public SNSCoordinator::Service {
     }
 
     Status GetServer(ServerContext* context, const User* user, Server* server) {
+        log(INFO,"Serving GetServer request");
         // store status in binary for logic
         int sid = -1;
         bool found;
@@ -173,6 +176,7 @@ class SNSCoordinatorImpl final : public SNSCoordinator::Service {
     }
 
     Status GetSlave(ServerContext* context, const ClusterId* clusterId, Server* server) {
+        log(INFO,"Serving GetSlave request");
         int sid = -1;
         if ((clusterId->cluster() % 3) + 1 != -1) {
             sid = (clusterId->cluster() % 3) + 1;
@@ -182,6 +186,7 @@ class SNSCoordinatorImpl final : public SNSCoordinator::Service {
     }
 
     Status GetAllUsers(ServerContext* context, const ClusterId* clusterId, Users* users) {
+        log(INFO,"Serving GetAllUsers request");
         for (int i = 0; i < all_users.size(); ++i) {
             users->add_users(all_users[i]);
         }
@@ -191,6 +196,7 @@ class SNSCoordinatorImpl final : public SNSCoordinator::Service {
 
 
 void RunCoordinator(std::string port_no) {
+    log(INFO,"Initializing Coordinator");
     SNSCoordinatorImpl service;
     ServerBuilder builder;
 
@@ -222,6 +228,9 @@ int main(int argc, char** argv) {
         }
     }
 
+    std::string log_file_name = std::string("Coordinator");
+    google::InitGoogleLogging(log_file_name.c_str());
+    log(INFO, "Logging Initialized. Coordinator starting...");
     RunCoordinator(def + port);
     return 0;
 }
